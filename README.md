@@ -1,36 +1,93 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# S6 → Catalyst Migration Console
 
-## Getting Started
+Black-and-white shadcn + Tailwind web app for managing migrations from legacy System 6 policy admin to Catalyst. **Currently uses mock data**; ready for API integration.
 
-First, run the development server:
+---
+
+## Quick start (for engineers)
+
+**Prerequisites:** Node.js 18+ and npm.
 
 ```bash
+# From the project root (after unzipping or cloning)
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Then open **http://localhost:3000**. No env vars or config needed; everything runs on mock data.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+**One-liner after you have the folder:**
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```bash
+npm install && npm run dev
+```
 
-## Learn More
+---
 
-To learn more about Next.js, take a look at the following resources:
+## Run locally
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+```bash
+npm install
+npm run dev
+```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+Open [http://localhost:3000](http://localhost:3000).
 
-## Deploy on Vercel
+## What’s included
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+- **Dashboard** (`/`) – Migration stats (total policies, migrated, failures, in progress). Uses migrations from context so new migrations are included.
+- **Migrations list** (`/migrations`) – Table of migration projects; expand a row to see product and policies. Click a row or “View” to open the migration detail. New migrations appear here after you create them.
+- **New migration** (`/migrations/new`) – Short wizard: **Name & date** → **Source product** (dropdown, no policies loaded) → **Target product** → **Done**. Redirects to the migrations table with the new migration added.
+- **Migration detail** (`/migrations/[id]`) – Pipeline (Trello-style):
+  - **Tabs**: All · Validation Failed · Validated · Migrated · Verified · Verification Failed. Policies move between tabs as you run Validate → Migrate → Verify.
+  - **Policies table**: Checkboxes to select one, some, or all. Buttons on the right: **Validate**, **Migrate**, **Verify**.
+  - **Validate**: Runs validation on selected policies. Failed policies cannot be migrated and appear in the “Validation Failed” tab.
+  - **Migrate**: Only validated policies can be migrated. Shows per-policy progress (spinner then success/fail).
+  - **Verify**: Only migrated policies can be verified. Mock compares attributes (dates, premium, customer). Failed ones appear in “Verification Failed” tab.
+- **Validation Failed** (`/validation-failed`) – Global list of all policies (across migrations) that failed validation. Link through to the migration to fix and re-validate.
+- **Verification Failed** (`/verification-failed`) – Global list of all migrated policies that failed verification. Link through to the migration to fix and re-verify.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+When everything succeeds, the “source” (pending) area empties and policies sit in Validated → Migrated → Verified.
+
+## Where to plug in APIs
+
+- **Mock data** – `src/lib/mock-data.ts`: replace product/migration lists, `getMockPoliciesForProduct()`, `runMockValidation()`, `runMockVerification()`, `createMigration()`. Types (`Policy`, `MigrationProject`, `PolicyPipelineStatus`, etc.) can stay.
+- **Context** – `src/contexts/migrations-context.tsx`: replace in-memory migrations and policy statuses with API calls (list migrations, get/update per-policy status).
+- **Dashboard** – `src/app/page.tsx`: `getDashboardStats(migrations)` can call an aggregate stats API.
+- **Migrations list** – `src/app/migrations/page.tsx`: uses `useMigrations().migrations`; replace with list API.
+- **Migration detail** – `src/app/migrations/[id]/page.tsx`: replace `getMockPoliciesForProduct`, `runMockValidation`, `runMockVerification` with APIs; keep Validate/Migrate/Verify flow and tabs.
+- **Validation Failed / Verification Failed** – `src/app/validation-failed/page.tsx`, `src/app/verification-failed/page.tsx`: replace `getAllValidationFailed()` / `getAllVerificationFailed()` with APIs that return (migration, policy, errors).
+
+Build: `npm run build`.
+
+---
+
+## How to package and share this project
+
+**Option A – Zip (no Git)**  
+From the parent of `S6MigratorConsole`:
+
+```bash
+# Exclude node_modules and build output so the archive is small
+zip -r S6MigratorConsole.zip S6MigratorConsole -x "S6MigratorConsole/node_modules/*" -x "S6MigratorConsole/.next/*" -x "S6MigratorConsole/.git/*"
+```
+
+Or use the included script from inside the project:
+
+```bash
+cd S6MigratorConsole
+npm run package
+```
+
+This creates `S6MigratorConsole.zip` in the parent folder (excluding `node_modules`, `.next`, `.git`).
+
+Then send `S6MigratorConsole.zip` (or the tarball). The recipient unzips and runs `npm install && npm run dev`.
+
+**Option B – Git**  
+Push to a repo and share the clone URL. The other engineer runs:
+
+```bash
+git clone <repo-url>
+cd S6MigratorConsole
+npm install && npm run dev
+```
