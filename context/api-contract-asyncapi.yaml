@@ -1,0 +1,753 @@
+asyncapi: 2.6.0
+info:
+  title: S6 Catalyst Migration Events API
+  version: 1.0.0
+  description: |
+    Server-Sent Events (SSE) API for real-time migration updates.
+
+    This API provides three independent SSE streams:
+    - **Status Stream** - Migration status and progress updates
+    - **Logs Stream** - Real-time log messages (success, warning, error, info)
+    - **Stats Stream** - Migration statistics and counters
+
+    **Architecture:**
+    - Server-to-client streaming (unidirectional)
+    - HTTP/2 multiplexing support (unlimited concurrent streams)
+    - Automatic reconnection via EventSource API
+    - Heartbeat messages every 30 seconds to keep connections alive
+
+    **Related Documentation:**
+    - OpenAPI Specification: `api-contract-openapi.yaml` (REST API)
+    - Integration Guide: `INTEGRATION-GUIDE.md`
+    - Event Schemas: `EVENT-SCHEMAS.md`
+    - TypeScript Types: `types.d.ts`
+
+  contact:
+    name: S6 Catalyst Migration Team
+    url: https://github.com/your-org/s6-catalyst-migration
+  license:
+    name: Proprietary
+
+servers:
+  sse:
+    url: http://localhost:5209
+    protocol: sse
+    description: SSE server for real-time migration events
+    variables:
+      port:
+        default: '5209'
+        description: SSE server port (configurable via appsettings.json)
+
+channels:
+  /api/migration/events/status:
+    description: |
+      Migration status updates stream.
+
+      **Event Types:**
+      - `connected` - Initial connection event (sent once on connect)
+      - `status-update` - Migration status changed (progress, state, timing)
+      - `heartbeat` - Connection keepalive (sent every 30 seconds)
+
+      **Connection Pattern:**
+      ```javascript
+      const statusSource = new EventSource('http://localhost:5209/api/migration/events/status');
+
+      statusSource.addEventListener('connected', (event) => {
+        const data = JSON.parse(event.data);
+        console.log('Connected to status stream:', data.clientId);
+      });
+
+      statusSource.addEventListener('status-update', (event) => {
+        const status = JSON.parse(event.data);
+        updateDashboard(status);
+      });
+
+      statusSource.addEventListener('heartbeat', (event) => {
+        console.log('Heartbeat received');
+      });
+
+      statusSource.onerror = (error) => {
+        console.error('SSE Error:', error);
+        // EventSource automatically reconnects
+      };
+      ```
+
+      **Reconnection:**
+      EventSource API automatically reconnects on connection loss. The server
+      maintains state and sends the latest status on reconnection.
+    subscribe:
+      summary: Subscribe to migration status updates
+      message:
+        oneOf:
+          - $ref: '#/components/messages/ConnectedEvent'
+          - $ref: '#/components/messages/StatusUpdate'
+          - $ref: '#/components/messages/Heartbeat'
+
+  /api/migration/events/logs:
+    description: |
+      Real-time log messages stream.
+
+      **Event Types:**
+      - `connected` - Initial connection event (sent once on connect)
+      - `log-entry` - New log message (success, warning, error, info)
+      - `heartbeat` - Connection keepalive (sent every 30 seconds)
+
+      **Connection Pattern:**
+      ```javascript
+      const logsSource = new EventSource('http://localhost:5209/api/migration/events/logs');
+
+      logsSource.addEventListener('connected', (event) => {
+        const data = JSON.parse(event.data);
+        console.log('Connected to logs stream:', data.clientId);
+      });
+
+      logsSource.addEventListener('log-entry', (event) => {
+        const log = JSON.parse(event.data);
+        appendLogToUI(log);
+      });
+
+      logsSource.addEventListener('heartbeat', (event) => {
+        console.log('Heartbeat received');
+      });
+
+      logsSource.onerror = (error) => {
+        console.error('SSE Error:', error);
+      };
+      ```
+
+      **Filtering:**
+      Logs cannot be filtered server-side. To filter by level (success, warning,
+      error, info), subscribe to the stream and filter client-side.
+    subscribe:
+      summary: Subscribe to real-time log messages
+      message:
+        oneOf:
+          - $ref: '#/components/messages/ConnectedEvent'
+          - $ref: '#/components/messages/LogEntryEvent'
+          - $ref: '#/components/messages/Heartbeat'
+
+  /api/migration/events/stats:
+    description: |
+      Migration statistics updates stream.
+
+      **Event Types:**
+      - `connected` - Initial connection event (sent once on connect)
+      - `stats-update` - Statistics changed (counters, averages)
+      - `heartbeat` - Connection keepalive (sent every 30 seconds)
+
+      **Connection Pattern:**
+      ```javascript
+      const statsSource = new EventSource('http://localhost:5209/api/migration/events/stats');
+
+      statsSource.addEventListener('connected', (event) => {
+        const data = JSON.parse(event.data);
+        console.log('Connected to stats stream:', data.clientId);
+      });
+
+      statsSource.addEventListener('stats-update', (event) => {
+        const stats = JSON.parse(event.data);
+        updateStatisticsWidgets(stats);
+      });
+
+      statsSource.addEventListener('heartbeat', (event) => {
+        console.log('Heartbeat received');
+      });
+
+      statsSource.onerror = (error) => {
+        console.error('SSE Error:', error);
+      };
+      ```
+
+      **Update Frequency:**
+      Stats are typically updated every 1-5 seconds during active migration.
+      Update frequency depends on processing speed.
+    subscribe:
+      summary: Subscribe to migration statistics updates
+      message:
+        oneOf:
+          - $ref: '#/components/messages/ConnectedEvent'
+          - $ref: '#/components/messages/StatsUpdate'
+          - $ref: '#/components/messages/Heartbeat'
+
+components:
+  messages:
+    ConnectedEvent:
+      name: connected
+      title: Connection Established
+      summary: Sent once when client connects to SSE stream
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/ConnectedPayload'
+      examples:
+        - name: Status Stream Connection
+          summary: Client connected to status stream
+          payload:
+            type: connection
+            clientId: abc-123-def-456
+            streamType: status
+            timestamp: '2026-02-04T14:30:00Z'
+            message: Connected to status stream
+        - name: Logs Stream Connection
+          summary: Client connected to logs stream
+          payload:
+            type: connection
+            clientId: xyz-789-uvw-012
+            streamType: logs
+            timestamp: '2026-02-04T14:30:00Z'
+            message: Connected to logs stream
+
+    StatusUpdate:
+      name: status-update
+      title: Migration Status Update
+      summary: Sent when migration status changes (progress, state, timing)
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/MigrationStatus'
+      examples:
+        - name: Running
+          summary: Migration in progress
+          payload:
+            id: 550e8400-e29b-41d4-a716-446655440000
+            status: running
+            progress: 45.2
+            elapsed: '00:15:32'
+            estimated: '00:34:28'
+            nextTask: Processing batch 12 of 25
+            latestStatus: Migrating policy ABC-123456
+            startTime: '2026-02-04T14:00:00Z'
+        - name: Paused
+          summary: Migration paused by user
+          payload:
+            id: 550e8400-e29b-41d4-a716-446655440000
+            status: paused
+            progress: 45.2
+            elapsed: '00:15:32'
+            estimated: '00:34:28'
+            nextTask: Paused at batch 12 of 25
+            latestStatus: Migration paused by user
+            startTime: '2026-02-04T14:00:00Z'
+        - name: Completed
+          summary: Migration completed successfully
+          payload:
+            id: 550e8400-e29b-41d4-a716-446655440000
+            status: completed
+            progress: 100.0
+            elapsed: '00:34:28'
+            estimated: '00:34:28'
+            nextTask: Migration complete
+            latestStatus: All policies migrated successfully
+            startTime: '2026-02-04T14:00:00Z'
+
+    LogEntryEvent:
+      name: log-entry
+      title: Log Entry
+      summary: Sent for each log message (success, warning, error, info)
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/LogEntry'
+      examples:
+        - name: Success
+          summary: Successful policy migration
+          payload:
+            id: log-001
+            timestamp: '2026-02-04T14:30:00Z'
+            level: success
+            message: Policy ABC-123456 migrated successfully
+            details: null
+            duration: '00:00:02.345'
+            action: view
+            actionLabel: View Details
+        - name: Warning
+          summary: Migration with warnings
+          payload:
+            id: log-002
+            timestamp: '2026-02-04T14:29:58Z'
+            level: warning
+            message: Policy DEF-789012 has missing coverage data
+            details: Coverage code XYZ not found in reference data
+            duration: '00:00:01.123'
+            action: retry
+            actionLabel: Retry Migration
+        - name: Error
+          summary: Migration failure
+          payload:
+            id: log-003
+            timestamp: '2026-02-04T14:29:55Z'
+            level: error
+            message: Policy GHI-345678 migration failed
+            details: Database connection timeout
+            duration: '00:00:05.678'
+            action: view-details
+            actionLabel: View Error Details
+        - name: Info
+          summary: Informational message
+          payload:
+            id: log-004
+            timestamp: '2026-02-04T14:29:50Z'
+            level: info
+            message: Starting batch 12 of 25
+            details: Batch contains 40 policies
+            duration: null
+            action: null
+            actionLabel: null
+
+    StatsUpdate:
+      name: stats-update
+      title: Statistics Update
+      summary: Sent when migration statistics change (counters, averages)
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/MigrationStats'
+      examples:
+        - name: In Progress
+          summary: Migration statistics during processing
+          payload:
+            totalRecords: 1000
+            processedRecords: 452
+            successCount: 420
+            warningCount: 25
+            errorCount: 7
+            averageProcessingTime: 2345.67
+        - name: Completed
+          summary: Final migration statistics
+          payload:
+            totalRecords: 1000
+            processedRecords: 1000
+            successCount: 950
+            warningCount: 35
+            errorCount: 15
+            averageProcessingTime: 2123.45
+
+    Heartbeat:
+      name: heartbeat
+      title: Heartbeat
+      summary: Sent every 30 seconds to keep connection alive
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/HeartbeatPayload'
+      examples:
+        - name: Heartbeat
+          summary: Regular heartbeat message
+          payload:
+            timestamp: '2026-02-04T14:30:30Z'
+
+  schemas:
+    ConnectedPayload:
+      type: object
+      description: Connection established event payload
+      required:
+        - type
+        - clientId
+        - streamType
+        - timestamp
+        - message
+      properties:
+        type:
+          type: string
+          const: connection
+          description: Event type (always 'connection')
+        clientId:
+          type: string
+          format: uuid
+          description: Unique client connection ID
+          example: abc-123-def-456
+        streamType:
+          type: string
+          enum: [status, logs, stats]
+          description: Stream type this client is connected to
+          example: status
+        timestamp:
+          type: string
+          format: date-time
+          description: Connection timestamp (ISO 8601)
+          example: '2026-02-04T14:30:00Z'
+        message:
+          type: string
+          description: Connection success message
+          example: Connected to status stream
+
+    MigrationStatus:
+      type: object
+      description: Migration status and progress
+      required:
+        - id
+        - status
+        - progress
+        - elapsed
+        - estimated
+        - nextTask
+        - latestStatus
+        - startTime
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Unique migration session ID
+          example: 550e8400-e29b-41d4-a716-446655440000
+        status:
+          type: string
+          enum: [running, paused, completed, error, stopped]
+          description: Current migration state
+          example: running
+        progress:
+          type: number
+          format: double
+          minimum: 0
+          maximum: 100
+          description: Migration progress percentage (0-100)
+          example: 45.2
+        elapsed:
+          type: string
+          pattern: '^[0-9]{2}:[0-9]{2}:[0-9]{2}$'
+          description: Elapsed time since migration started (HH:mm:ss)
+          example: '00:15:32'
+        estimated:
+          type: string
+          pattern: '^[0-9]{2}:[0-9]{2}:[0-9]{2}$'
+          description: Estimated total time to completion (HH:mm:ss)
+          example: '00:34:28'
+        nextTask:
+          type: string
+          description: Description of the next task to be executed
+          example: Processing batch 12 of 25
+        latestStatus:
+          type: string
+          description: Most recent status message
+          example: Migrating policy ABC-123456
+        startTime:
+          type: string
+          format: date-time
+          description: Migration start timestamp (ISO 8601)
+          example: '2026-02-04T14:00:00Z'
+
+    LogEntry:
+      type: object
+      description: Log entry with level, message, and optional action
+      required:
+        - id
+        - timestamp
+        - level
+        - message
+      properties:
+        id:
+          type: string
+          description: Unique log entry ID
+          example: log-001
+        timestamp:
+          type: string
+          format: date-time
+          description: Log entry timestamp (ISO 8601)
+          example: '2026-02-04T14:30:00Z'
+        level:
+          type: string
+          enum: [success, warning, error, info]
+          description: Log severity level
+          example: success
+        message:
+          type: string
+          description: Log message
+          example: Policy ABC-123456 migrated successfully
+        details:
+          type: string
+          nullable: true
+          description: Additional log details (optional)
+          example: Coverage code XYZ not found in reference data
+        duration:
+          type: string
+          nullable: true
+          pattern: '^[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]{3})?$'
+          description: Operation duration (HH:mm:ss.fff, optional)
+          example: '00:00:02.345'
+        action:
+          type: string
+          enum: [view, retry, view-details]
+          nullable: true
+          description: Action button type (optional)
+          example: view
+        actionLabel:
+          type: string
+          nullable: true
+          description: Action button label (optional)
+          example: View Details
+
+    MigrationStats:
+      type: object
+      description: Migration statistics and counters
+      required:
+        - totalRecords
+        - processedRecords
+        - successCount
+        - warningCount
+        - errorCount
+        - averageProcessingTime
+      properties:
+        totalRecords:
+          type: integer
+          description: Total number of records to process
+          example: 1000
+        processedRecords:
+          type: integer
+          description: Number of records processed so far
+          example: 452
+        successCount:
+          type: integer
+          description: Number of successful migrations
+          example: 420
+        warningCount:
+          type: integer
+          description: Number of migrations with warnings
+          example: 25
+        errorCount:
+          type: integer
+          description: Number of failed migrations
+          example: 7
+        averageProcessingTime:
+          type: number
+          format: double
+          description: Average processing time per record (milliseconds)
+          example: 2345.67
+
+    HeartbeatPayload:
+      type: object
+      description: Heartbeat message payload
+      required:
+        - timestamp
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+          description: Heartbeat timestamp (ISO 8601)
+          example: '2026-02-04T14:30:30Z'
+
+  securitySchemes: {}
+
+x-sse-configuration:
+  heartbeatInterval: 30000
+  description: Heartbeat messages sent every 30 seconds (30000ms)
+
+  clientTimeout: 120000
+  description: Client connection timeout after 120 seconds (120000ms) of inactivity
+
+  maxClients: 100
+  description: Maximum concurrent SSE connections (default 100, configurable)
+
+  reconnectionStrategy:
+    description: |
+      EventSource API handles reconnection automatically:
+      - Initial retry: ~3 seconds
+      - Subsequent retries: exponential backoff
+      - Maximum retry interval: ~30 seconds
+      - Server sends last-known state on reconnection
+
+  connectionFlow:
+    description: |
+      1. Client opens EventSource connection
+      2. Server sends 'connected' event with clientId
+      3. Server sends current state (status/logs/stats depending on stream)
+      4. Server sends updates as they occur
+      5. Server sends heartbeat every 30 seconds
+      6. On connection loss, EventSource auto-reconnects (step 1)
+
+  errorHandling:
+    description: |
+      **Connection Errors:**
+      - Network failure: EventSource auto-reconnects
+      - Server unavailable (503): EventSource retries with backoff
+      - Authentication failure (401): EventSource stops (no auth in MVP)
+
+      **Client-Side Handling:**
+      ```javascript
+      source.onerror = (error) => {
+        if (source.readyState === EventSource.CONNECTING) {
+          console.log('Reconnecting...');
+        } else if (source.readyState === EventSource.CLOSED) {
+          console.error('Connection closed permanently');
+        }
+      };
+      ```
+
+  httpHeaders:
+    Accept:
+      description: Client must send 'text/event-stream' or '*/*'
+      example: 'text/event-stream'
+
+    Content-Type:
+      description: Server responds with 'text/event-stream'
+      example: 'text/event-stream'
+
+    Cache-Control:
+      description: Server sends 'no-cache' to prevent caching
+      example: 'no-cache'
+
+    Connection:
+      description: Server sends 'keep-alive' for persistent connection
+      example: 'keep-alive'
+
+  sseMessageFormat:
+    description: |
+      SSE messages follow this format:
+      ```
+      event: status-update
+      data: {"id":"550e8400...","status":"running","progress":45.2,...}
+
+      ```
+
+      **Fields:**
+      - `event:` - Event type (connected, status-update, log-entry, stats-update, heartbeat)
+      - `data:` - JSON payload
+      - Empty line marks end of message
+
+      **Example:**
+      ```
+      event: connected
+      data: {"type":"connection","clientId":"abc-123","streamType":"status",...}
+
+      event: status-update
+      data: {"id":"550e8400...","status":"running","progress":45.2,...}
+
+      event: heartbeat
+      data: {"timestamp":"2026-02-04T14:30:30Z"}
+
+      ```
+
+x-code-examples:
+  javascript-eventsource:
+    lang: javascript
+    label: JavaScript EventSource
+    source: |
+      // Subscribe to all three streams
+      const statusSource = new EventSource('http://localhost:5209/api/migration/events/status');
+      const logsSource = new EventSource('http://localhost:5209/api/migration/events/logs');
+      const statsSource = new EventSource('http://localhost:5209/api/migration/events/stats');
+
+      // Status updates
+      statusSource.addEventListener('status-update', (event) => {
+        const status = JSON.parse(event.data);
+        console.log(`Progress: ${status.progress}%, Status: ${status.status}`);
+        updateProgressBar(status.progress);
+      });
+
+      // Log messages
+      logsSource.addEventListener('log-entry', (event) => {
+        const log = JSON.parse(event.data);
+        console.log(`[${log.level}] ${log.message}`);
+        appendLogToUI(log);
+      });
+
+      // Statistics
+      statsSource.addEventListener('stats-update', (event) => {
+        const stats = JSON.parse(event.data);
+        console.log(`Processed: ${stats.processedRecords}/${stats.totalRecords}`);
+        updateStatsWidgets(stats);
+      });
+
+      // Heartbeats (optional logging)
+      statusSource.addEventListener('heartbeat', () => {
+        console.log('Status stream heartbeat');
+      });
+
+      // Error handling
+      [statusSource, logsSource, statsSource].forEach(source => {
+        source.onerror = (error) => {
+          console.error('SSE Error:', error);
+          // EventSource auto-reconnects
+        };
+      });
+
+  typescript-react:
+    lang: typescript
+    label: TypeScript React Hook
+    source: |
+      import { useEffect, useState } from 'react';
+
+      interface MigrationStatus {
+        id: string;
+        status: 'running' | 'paused' | 'completed' | 'error' | 'stopped';
+        progress: number;
+        elapsed: string;
+        estimated: string;
+        nextTask: string;
+        latestStatus: string;
+        startTime: string;
+      }
+
+      export function useMigrationStatus() {
+        const [status, setStatus] = useState<MigrationStatus | null>(null);
+        const [connected, setConnected] = useState(false);
+
+        useEffect(() => {
+          const source = new EventSource('http://localhost:5209/api/migration/events/status');
+
+          source.addEventListener('connected', () => {
+            setConnected(true);
+          });
+
+          source.addEventListener('status-update', (event) => {
+            const data: MigrationStatus = JSON.parse(event.data);
+            setStatus(data);
+          });
+
+          source.onerror = () => {
+            setConnected(false);
+          };
+
+          return () => {
+            source.close();
+          };
+        }, []);
+
+        return { status, connected };
+      }
+
+  blazor-csharp:
+    lang: csharp
+    label: Blazor C# Component
+    source: |
+      @using Microsoft.JSInterop
+      @inject IJSRuntime JS
+
+      <div>
+        <p>Status: @_status?.Status</p>
+        <p>Progress: @_status?.Progress%</p>
+      </div>
+
+      @code {
+        private MigrationStatus? _status;
+        private IJSObjectReference? _module;
+
+        protected override async Task OnInitializedAsync()
+        {
+          _module = await JS.InvokeAsync<IJSObjectReference>("import", "./sse-client.js");
+          await _module.InvokeVoidAsync("connectToStatusStream",
+            "http://localhost:5209/api/migration/events/status",
+            DotNetObjectReference.Create(this));
+        }
+
+        [JSInvokable]
+        public void OnStatusUpdate(MigrationStatus status)
+        {
+          _status = status;
+          StateHasChanged();
+        }
+
+        public void Dispose()
+        {
+          _module?.InvokeVoidAsync("disconnect");
+        }
+      }
+
+      // sse-client.js
+      export function connectToStatusStream(url, dotnetRef) {
+        const source = new EventSource(url);
+        source.addEventListener('status-update', (event) => {
+          const status = JSON.parse(event.data);
+          dotnetRef.invokeMethodAsync('OnStatusUpdate', status);
+        });
+        window.sseSource = source;
+      }
+
+      export function disconnect() {
+        if (window.sseSource) {
+          window.sseSource.close();
+        }
+      }

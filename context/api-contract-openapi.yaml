@@ -1,0 +1,853 @@
+openapi: 3.0.3
+info:
+  title: S6 Catalyst Migration Dashboard API
+  version: 1.0.0
+  description: |
+    REST API for controlling and querying the S6 Catalyst Migration Tool.
+
+    This API provides command endpoints (pause, resume, stop, restart) for controlling
+    migration execution, query endpoints for fetching current state, and SSE event streams
+    for real-time updates.
+
+    **Architecture:**
+    - Migration tool is the MASTER - dashboard subscribes to our events
+    - Server-Sent Events (SSE) for real-time updates (see AsyncAPI spec)
+    - REST API for commands and queries
+    - No authentication for MVP (internal tool, single machine)
+
+    **Related Documentation:**
+    - AsyncAPI Specification: `api-contract-asyncapi.yaml` (SSE events)
+    - Integration Guide: `INTEGRATION-GUIDE.md`
+    - Event Schemas: `EVENT-SCHEMAS.md`
+    - TypeScript Types: `types.d.ts`
+
+  contact:
+    name: S6 Catalyst Migration Team
+    url: https://github.com/your-org/s6-catalyst-migration
+  license:
+    name: Proprietary
+
+servers:
+  - url: http://localhost:5209
+    description: Default local development server
+  - url: http://localhost:{port}
+    description: Configurable local server
+    variables:
+      port:
+        default: '5209'
+        description: SSE server port (configurable via appsettings.json)
+
+tags:
+  - name: commands
+    description: Migration control commands (pause, resume, stop, restart)
+  - name: queries
+    description: Query endpoints for fetching current state
+  - name: health
+    description: Health and version information
+
+paths:
+  /api/migration/pause:
+    post:
+      tags: [commands]
+      summary: Pause ongoing migration
+      description: |
+        Pauses the currently running migration. The migration can be resumed later
+        using the `/api/migration/resume` endpoint.
+
+        **Behavior:**
+        - If migration is already paused: returns success (idempotent)
+        - If migration is not running: may return 400 error
+        - Broadcasts `status-update` event via SSE with status="paused"
+
+        **SSE Event:**
+        ```json
+        {
+          "type": "status-update",
+          "data": {
+            "status": "paused",
+            "progress": 45.2,
+            ...
+          }
+        }
+        ```
+      operationId: pauseMigration
+      responses:
+        '200':
+          description: Migration paused successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommandResponse'
+              examples:
+                success:
+                  summary: Successful pause
+                  value:
+                    message: Migration paused successfully
+                    timestamp: '2026-02-04T14:30:00Z'
+        '400':
+          description: Bad request (migration not in pausable state)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                notRunning:
+                  summary: Migration not running
+                  value:
+                    error: Migration is not currently running
+                    timestamp: '2026-02-04T14:30:00Z'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                internalError:
+                  summary: Internal error
+                  value:
+                    error: Failed to pause migration
+                    timestamp: '2026-02-04T14:30:00Z'
+
+  /api/migration/resume:
+    post:
+      tags: [commands]
+      summary: Resume paused migration
+      description: |
+        Resumes a previously paused migration. If the migration is already running,
+        this endpoint returns success (idempotent behavior).
+
+        **Behavior:**
+        - If migration is paused: resumes processing
+        - If migration is already running: returns success (idempotent)
+        - If migration is completed/stopped: may return 400 error
+        - Broadcasts `status-update` event via SSE with status="running"
+
+        **SSE Event:**
+        ```json
+        {
+          "type": "status-update",
+          "data": {
+            "status": "running",
+            "progress": 45.2,
+            ...
+          }
+        }
+        ```
+      operationId: resumeMigration
+      responses:
+        '200':
+          description: Migration resumed successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommandResponse'
+              examples:
+                success:
+                  summary: Successful resume
+                  value:
+                    message: Migration resumed successfully
+                    timestamp: '2026-02-04T14:31:00Z'
+        '400':
+          description: Bad request (migration not in resumable state)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/migration/stop:
+    post:
+      tags: [commands]
+      summary: Stop migration completely
+      description: |
+        Stops the migration completely. Unlike pause, this terminates the migration
+        process. To restart, use the `/api/migration/restart` endpoint.
+
+        **Behavior:**
+        - Stops all processing immediately
+        - Migration cannot be resumed, only restarted from beginning
+        - Broadcasts `status-update` event via SSE with status="stopped"
+
+        **Warning:** This is a destructive operation. Progress will be lost unless
+        the migration tool has checkpointing enabled.
+
+        **SSE Event:**
+        ```json
+        {
+          "type": "status-update",
+          "data": {
+            "status": "stopped",
+            "progress": 45.2,
+            ...
+          }
+        }
+        ```
+      operationId: stopMigration
+      responses:
+        '200':
+          description: Migration stopped successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommandResponse'
+              examples:
+                success:
+                  summary: Successful stop
+                  value:
+                    message: Migration stopped successfully
+                    timestamp: '2026-02-04T14:32:00Z'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/migration/restart:
+    post:
+      tags: [commands]
+      summary: Restart migration from beginning
+      description: |
+        Restarts the migration from the beginning. This stops any currently running
+        migration and starts a new migration session.
+
+        **Behavior:**
+        - Stops current migration (if running)
+        - Resets all counters and state
+        - Starts new migration session with new session ID
+        - Broadcasts `status-update` event via SSE with status="running", progress=0
+
+        **Warning:** This resets all progress and starts over.
+
+        **SSE Event:**
+        ```json
+        {
+          "type": "status-update",
+          "data": {
+            "id": "new-session-id",
+            "status": "running",
+            "progress": 0,
+            ...
+          }
+        }
+        ```
+      operationId: restartMigration
+      responses:
+        '200':
+          description: Migration restarted successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommandResponse'
+              examples:
+                success:
+                  summary: Successful restart
+                  value:
+                    message: Migration restarted successfully
+                    timestamp: '2026-02-04T14:33:00Z'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/migration/status:
+    get:
+      tags: [queries]
+      summary: Get current migration status
+      description: |
+        Returns the current migration status including progress, timing, and state.
+
+        This is a snapshot query. For real-time updates, subscribe to the
+        `/api/migration/events/status` SSE stream (see AsyncAPI spec).
+
+        **Use Cases:**
+        - Initial page load (get current state before subscribing to SSE)
+        - Reconnection after network failure
+        - Polling fallback if SSE is unavailable
+
+        **Note:** This endpoint returns the same data structure as the `status-update`
+        SSE event, ensuring consistency between query and event-driven patterns.
+      operationId: getStatus
+      responses:
+        '200':
+          description: Current migration status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MigrationStatus'
+              examples:
+                running:
+                  summary: Migration running
+                  value:
+                    id: 550e8400-e29b-41d4-a716-446655440000
+                    status: running
+                    progress: 45.2
+                    elapsed: '00:15:32'
+                    estimated: '00:34:28'
+                    nextTask: Processing batch 12 of 25
+                    latestStatus: Migrating policy ABC-123456
+                    startTime: '2026-02-04T14:00:00Z'
+                paused:
+                  summary: Migration paused
+                  value:
+                    id: 550e8400-e29b-41d4-a716-446655440000
+                    status: paused
+                    progress: 45.2
+                    elapsed: '00:15:32'
+                    estimated: '00:34:28'
+                    nextTask: Paused at batch 12 of 25
+                    latestStatus: Migration paused by user
+                    startTime: '2026-02-04T14:00:00Z'
+                completed:
+                  summary: Migration completed
+                  value:
+                    id: 550e8400-e29b-41d4-a716-446655440000
+                    status: completed
+                    progress: 100.0
+                    elapsed: '00:34:28'
+                    estimated: '00:34:28'
+                    nextTask: Migration complete
+                    latestStatus: All policies migrated successfully
+                    startTime: '2026-02-04T14:00:00Z'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/migration/logs:
+    get:
+      tags: [queries]
+      summary: Get recent log entries
+      description: |
+        Returns recent log entries with optional limit parameter.
+
+        This is a snapshot query. For real-time log streaming, subscribe to the
+        `/api/migration/events/logs` SSE stream (see AsyncAPI spec).
+
+        **Use Cases:**
+        - Initial page load (get recent logs before subscribing to SSE)
+        - Loading historical logs (pagination)
+        - Exporting logs for analysis
+
+        **Note:** Logs are returned in reverse chronological order (newest first).
+      operationId: getLogs
+      parameters:
+        - name: limit
+          in: query
+          description: Maximum number of log entries to return
+          required: false
+          schema:
+            type: integer
+            default: 100
+            minimum: 1
+            maximum: 1000
+          examples:
+            default:
+              summary: Default limit
+              value: 100
+            small:
+              summary: Last 10 entries
+              value: 10
+            large:
+              summary: Last 500 entries
+              value: 500
+      responses:
+        '200':
+          description: List of recent log entries
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/LogEntry'
+              examples:
+                mixed:
+                  summary: Mixed log entries
+                  value:
+                    - id: log-001
+                      timestamp: '2026-02-04T14:30:00Z'
+                      level: success
+                      message: Policy ABC-123456 migrated successfully
+                      details: null
+                      duration: '00:00:02.345'
+                      action: view
+                      actionLabel: View Details
+                    - id: log-002
+                      timestamp: '2026-02-04T14:29:58Z'
+                      level: warning
+                      message: Policy DEF-789012 has missing coverage data
+                      details: Coverage code XYZ not found in reference data
+                      duration: '00:00:01.123'
+                      action: retry
+                      actionLabel: Retry Migration
+                    - id: log-003
+                      timestamp: '2026-02-04T14:29:55Z'
+                      level: error
+                      message: Policy GHI-345678 migration failed
+                      details: Database connection timeout
+                      duration: '00:00:05.678'
+                      action: view-details
+                      actionLabel: View Error Details
+        '400':
+          description: Bad request (invalid limit parameter)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/migration/stats:
+    get:
+      tags: [queries]
+      summary: Get current migration statistics
+      description: |
+        Returns current migration statistics including counters and averages.
+
+        This is a snapshot query. For real-time statistics updates, subscribe to the
+        `/api/migration/events/stats` SSE stream (see AsyncAPI spec).
+
+        **Use Cases:**
+        - Initial page load (get current stats before subscribing to SSE)
+        - Dashboard widgets (success rate, error count, etc.)
+        - Performance monitoring
+
+        **Note:** This endpoint returns the same data structure as the `stats-update`
+        SSE event, ensuring consistency between query and event-driven patterns.
+      operationId: getStats
+      responses:
+        '200':
+          description: Current migration statistics
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MigrationStats'
+              examples:
+                inProgress:
+                  summary: Migration in progress
+                  value:
+                    totalRecords: 1000
+                    processedRecords: 452
+                    successCount: 420
+                    warningCount: 25
+                    errorCount: 7
+                    averageProcessingTime: 2345.67
+                completed:
+                  summary: Migration completed
+                  value:
+                    totalRecords: 1000
+                    processedRecords: 1000
+                    successCount: 950
+                    warningCount: 35
+                    errorCount: 15
+                    averageProcessingTime: 2123.45
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/health:
+    get:
+      tags: [health]
+      summary: Health check endpoint
+      description: |
+        Returns the health status of the SSE server, including connection counts
+        and migration status.
+
+        **Use Cases:**
+        - Load balancer health checks
+        - Monitoring/alerting systems
+        - Dashboard connection diagnostics
+
+        **Note:** This endpoint is always available, even if migration is not running.
+      operationId: getHealth
+      responses:
+        '200':
+          description: Server is healthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+              examples:
+                healthy:
+                  summary: Healthy server
+                  value:
+                    status: healthy
+                    version: 1.0.0
+                    timestamp: '2026-02-04T14:35:00Z'
+                    connections:
+                      status: 3
+                      logs: 2
+                      stats: 1
+                      total: 6
+                    migration:
+                      status: running
+
+  /api/version:
+    get:
+      tags: [health]
+      summary: API version and endpoint information
+      description: |
+        Returns the API version, protocol information, and list of available endpoints.
+
+        **Use Cases:**
+        - API discovery
+        - Version compatibility checks
+        - Documentation generation
+      operationId: getVersion
+      responses:
+        '200':
+          description: API version information
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VersionResponse'
+              examples:
+                version:
+                  summary: Version info
+                  value:
+                    version: 1.0.0
+                    apiVersion: v1
+                    protocol: SSE
+                    specVersion:
+                      openapi: 3.0.3
+                      asyncapi: 2.6.0
+                    endpoints:
+                      events:
+                        - /api/migration/events/status
+                        - /api/migration/events/logs
+                        - /api/migration/events/stats
+                      commands:
+                        - POST /api/migration/pause
+                        - POST /api/migration/resume
+                        - POST /api/migration/stop
+                        - POST /api/migration/restart
+                      queries:
+                        - GET /api/migration/status
+                        - GET /api/migration/logs?limit=N
+                        - GET /api/migration/stats
+
+components:
+  schemas:
+    MigrationStatus:
+      type: object
+      description: Current migration status and progress
+      required:
+        - id
+        - status
+        - progress
+        - elapsed
+        - estimated
+        - nextTask
+        - latestStatus
+        - startTime
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Unique migration session ID
+          example: 550e8400-e29b-41d4-a716-446655440000
+        status:
+          type: string
+          enum: [running, paused, completed, error, stopped]
+          description: Current migration state
+          example: running
+        progress:
+          type: number
+          format: double
+          minimum: 0
+          maximum: 100
+          description: Migration progress percentage (0-100)
+          example: 45.2
+        elapsed:
+          type: string
+          pattern: '^[0-9]{2}:[0-9]{2}:[0-9]{2}$'
+          description: Elapsed time since migration started (HH:mm:ss)
+          example: '00:15:32'
+        estimated:
+          type: string
+          pattern: '^[0-9]{2}:[0-9]{2}:[0-9]{2}$'
+          description: Estimated total time to completion (HH:mm:ss)
+          example: '00:34:28'
+        nextTask:
+          type: string
+          description: Description of the next task to be executed
+          example: Processing batch 12 of 25
+        latestStatus:
+          type: string
+          description: Most recent status message
+          example: Migrating policy ABC-123456
+        startTime:
+          type: string
+          format: date-time
+          description: Migration start timestamp (ISO 8601)
+          example: '2026-02-04T14:00:00Z'
+
+    LogEntry:
+      type: object
+      description: Log entry with level, message, and optional action
+      required:
+        - id
+        - timestamp
+        - level
+        - message
+      properties:
+        id:
+          type: string
+          description: Unique log entry ID
+          example: log-001
+        timestamp:
+          type: string
+          format: date-time
+          description: Log entry timestamp (ISO 8601)
+          example: '2026-02-04T14:30:00Z'
+        level:
+          type: string
+          enum: [success, warning, error, info]
+          description: Log severity level
+          example: success
+        message:
+          type: string
+          description: Log message
+          example: Policy ABC-123456 migrated successfully
+        details:
+          type: string
+          nullable: true
+          description: Additional log details (optional)
+          example: Coverage code XYZ not found in reference data
+        duration:
+          type: string
+          nullable: true
+          pattern: '^[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]{3})?$'
+          description: Operation duration (HH:mm:ss.fff, optional)
+          example: '00:00:02.345'
+        action:
+          type: string
+          enum: [view, retry, view-details]
+          nullable: true
+          description: Action button type (optional)
+          example: view
+        actionLabel:
+          type: string
+          nullable: true
+          description: Action button label (optional)
+          example: View Details
+
+    MigrationStats:
+      type: object
+      description: Migration statistics and counters
+      required:
+        - totalRecords
+        - processedRecords
+        - successCount
+        - warningCount
+        - errorCount
+        - averageProcessingTime
+      properties:
+        totalRecords:
+          type: integer
+          description: Total number of records to process
+          example: 1000
+        processedRecords:
+          type: integer
+          description: Number of records processed so far
+          example: 452
+        successCount:
+          type: integer
+          description: Number of successful migrations
+          example: 420
+        warningCount:
+          type: integer
+          description: Number of migrations with warnings
+          example: 25
+        errorCount:
+          type: integer
+          description: Number of failed migrations
+          example: 7
+        averageProcessingTime:
+          type: number
+          format: double
+          description: Average processing time per record (milliseconds)
+          example: 2345.67
+
+    CommandResponse:
+      type: object
+      description: Standard response for command endpoints
+      properties:
+        message:
+          type: string
+          description: Success message
+          example: Migration paused successfully
+        timestamp:
+          type: string
+          format: date-time
+          description: Response timestamp (ISO 8601)
+          example: '2026-02-04T14:30:00Z'
+
+    ErrorResponse:
+      type: object
+      description: Standard error response
+      required:
+        - error
+        - timestamp
+      properties:
+        error:
+          type: string
+          description: Error message
+          example: Failed to pause migration
+        timestamp:
+          type: string
+          format: date-time
+          description: Error timestamp (ISO 8601)
+          example: '2026-02-04T14:30:00Z'
+
+    HealthResponse:
+      type: object
+      description: Health check response with connection counts
+      required:
+        - status
+        - version
+        - timestamp
+        - connections
+        - migration
+      properties:
+        status:
+          type: string
+          enum: [healthy, degraded, unhealthy]
+          description: Overall health status
+          example: healthy
+        version:
+          type: string
+          description: API version
+          example: 1.0.0
+        timestamp:
+          type: string
+          format: date-time
+          description: Health check timestamp (ISO 8601)
+          example: '2026-02-04T14:35:00Z'
+        connections:
+          type: object
+          description: SSE connection counts by stream type
+          required:
+            - status
+            - logs
+            - stats
+            - total
+          properties:
+            status:
+              type: integer
+              description: Number of clients connected to status stream
+              example: 3
+            logs:
+              type: integer
+              description: Number of clients connected to logs stream
+              example: 2
+            stats:
+              type: integer
+              description: Number of clients connected to stats stream
+              example: 1
+            total:
+              type: integer
+              description: Total number of connected clients
+              example: 6
+        migration:
+          type: object
+          description: Current migration status
+          required:
+            - status
+          properties:
+            status:
+              type: string
+              enum: [running, paused, completed, error, stopped]
+              description: Current migration state
+              example: running
+
+    VersionResponse:
+      type: object
+      description: API version and endpoint information
+      required:
+        - version
+        - apiVersion
+        - protocol
+        - specVersion
+        - endpoints
+      properties:
+        version:
+          type: string
+          description: API version
+          example: 1.0.0
+        apiVersion:
+          type: string
+          description: API version prefix
+          example: v1
+        protocol:
+          type: string
+          description: Communication protocol
+          example: SSE
+        specVersion:
+          type: object
+          description: Specification versions
+          required:
+            - openapi
+            - asyncapi
+          properties:
+            openapi:
+              type: string
+              description: OpenAPI specification version
+              example: 3.0.3
+            asyncapi:
+              type: string
+              description: AsyncAPI specification version
+              example: 2.6.0
+        endpoints:
+          type: object
+          description: Available endpoints by category
+          required:
+            - events
+            - commands
+            - queries
+          properties:
+            events:
+              type: array
+              description: SSE event stream endpoints
+              items:
+                type: string
+              example:
+                - /api/migration/events/status
+                - /api/migration/events/logs
+                - /api/migration/events/stats
+            commands:
+              type: array
+              description: Command endpoints
+              items:
+                type: string
+              example:
+                - POST /api/migration/pause
+                - POST /api/migration/resume
+                - POST /api/migration/stop
+                - POST /api/migration/restart
+            queries:
+              type: array
+              description: Query endpoints
+              items:
+                type: string
+              example:
+                - GET /api/migration/status
+                - GET /api/migration/logs?limit=N
+                - GET /api/migration/stats

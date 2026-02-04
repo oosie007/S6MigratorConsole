@@ -287,7 +287,17 @@ function MigrationPipelineSection({
 
 export default function MigrationsPage() {
   const router = useRouter();
-  const { migrations, getPolicyStatus, updatePolicyStatuses } = useMigrations();
+  const { migrations, policyStatuses, getPolicyStatus, updatePolicyStatuses } = useMigrations();
+
+  const getPipelineCounts = (migrationId: string) => {
+    const byPolicy = policyStatuses[migrationId] ?? {};
+    const statuses = Object.values(byPolicy);
+    return {
+      validated: statuses.filter((s) => s.validation === "pass").length,
+      migrated: statuses.filter((s) => s.migration === "success").length,
+      verified: statuses.filter((s) => s.verification === "pass").length,
+    };
+  };
   const [expandedMigrationId, setExpandedMigrationId] = useState<string | null>(null);
   const [expandedProductMigrationId, setExpandedProductMigrationId] = useState<string | null>(null);
   const [policySelections, setPolicySelections] = useState<Record<string, Set<string>>>({});
@@ -405,8 +415,9 @@ export default function MigrationsPage() {
                 <TableHead className="text-muted-foreground">Created</TableHead>
                 <TableHead className="text-muted-foreground">Status</TableHead>
                 <TableHead className="text-right text-muted-foreground">Policies</TableHead>
+                <TableHead className="text-right text-muted-foreground">Validated</TableHead>
                 <TableHead className="text-right text-muted-foreground">Migrated</TableHead>
-                <TableHead className="text-right text-muted-foreground">Failed</TableHead>
+                <TableHead className="text-right text-muted-foreground">Verified</TableHead>
                 <TableHead className="w-16" />
               </TableRow>
             </TableHeader>
@@ -416,6 +427,7 @@ export default function MigrationsPage() {
                 const productOpen = expandedProductMigrationId === m.id;
                 const productNames = getMigrationProductNames(m);
                 const selectedPolicies = policySelections[m.id] ?? new Set();
+                const counts = getPipelineCounts(m.id);
 
                 return (
                   <Fragment key={m.id}>
@@ -443,8 +455,9 @@ export default function MigrationsPage() {
                         <StatusBadge status={m.status} />
                       </TableCell>
                       <TableCell className="text-right">{m.totalPolicies}</TableCell>
-                      <TableCell className="text-right">{m.migratedCount}</TableCell>
-                      <TableCell className="text-right">{m.failedCount}</TableCell>
+                      <TableCell className="text-right">{counts.validated}</TableCell>
+                      <TableCell className="text-right">{counts.migrated}</TableCell>
+                      <TableCell className="text-right">{counts.verified}</TableCell>
                       <TableCell onClick={(e) => e.stopPropagation()}>
                         <Button
                           variant="ghost"
@@ -458,7 +471,7 @@ export default function MigrationsPage() {
                     </TableRow>
                     {migrationOpen && (
                       <TableRow key={`${m.id}-expanded`} className="border-border bg-muted/20">
-                        <TableCell colSpan={8} className="p-0 align-top">
+                        <TableCell colSpan={9} className="p-0 align-top">
                           <div className="px-4 pb-4 pt-1">
                             <Collapsible
                               open={productOpen}
