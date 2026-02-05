@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutDashboard, ListTodo, PlusCircle } from "lucide-react";
+import { LayoutDashboard, ListTodo, PlusCircle, FileText } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
@@ -11,6 +11,7 @@ const nav = [
   { label: "Dashboard", href: "/", icon: LayoutDashboard },
   { label: "Migrations", href: "/migrations", icon: ListTodo },
   { label: "New migration", href: "/migrations/new", icon: PlusCircle },
+  { label: "Policies", href: "/policies", icon: FileText },
 ];
 
 export function AppSidebar() {

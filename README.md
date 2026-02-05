@@ -14,7 +14,7 @@ npm install
 npm run dev
 ```
 
-Then open **http://localhost:3000**. No env vars or config needed; everything runs on mock data.
+Then open **http://localhost:3000**.
 
 **One-liner after you have the folder:**
 
@@ -24,7 +24,7 @@ npm install && npm run dev
 
 ---
 
-## Run locally
+## Run locally (from this repo)
 
 ```bash
 npm install
@@ -32,6 +32,8 @@ npm run dev
 ```
 
 Open [http://localhost:3000](http://localhost:3000).
+
+If you want to use the live UAT policy search APIs on the **Policies** page instead of pure mock data, you must also create a local `.env.local` with the UAT settings that your team shares out of band (not in this repo).
 
 ## What’s included
 
@@ -89,5 +91,14 @@ Push to a repo and share the clone URL. The other engineer runs:
 ```bash
 git clone <repo-url>
 cd S6MigratorConsole
-npm install && npm run dev
+npm install
+npm run dev
 ```
+
+Once running, open `http://localhost:3000` and:
+
+- Use **Dashboard / Migrations** for the mock migration flows.
+- Use **Policies** to search either:
+  - By **effective date** (UAT-backed when env is set; mock otherwise).
+  - By **policy number** (UAT-backed when env is set; mock otherwise).
+

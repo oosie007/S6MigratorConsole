@@ -19,6 +19,7 @@ export interface Policy {
   dateEffective: string;
   customerName: string;
   productName: string;
+  status?: string; // e.g. Active, Cancelled (for live UAT data)
   validationStatus?: PolicyValidationStatus;
   migrationStatus?: PolicyMigrationStatus;
   validationErrors?: string[];
@@ -78,12 +79,14 @@ export function getMockPoliciesForProduct(productId: string, limit = 50): Policy
     const year = 2022 + (i % 3);
     const month = (i % 12) + 1;
     const day = (i % 28) + 1;
+    const statuses: Array<Policy["status"]> = ["Active", "Cancelled", "Suspended"];
     policies.push({
       id: `pol-${productId}-${i}`,
       policyNumber: `S6-${String(10000 + i).padStart(5, "0")}`,
       dateEffective: `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`,
       customerName: `${firstNames[i % firstNames.length]} ${lastNames[i % lastNames.length]}`,
       productName: product?.name ?? "Unknown",
+      status: statuses[i % statuses.length],
       validationStatus: "pending",
       migrationStatus: "pending",
     });
