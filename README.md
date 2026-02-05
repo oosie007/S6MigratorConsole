@@ -35,6 +35,13 @@ Open [http://localhost:3000](http://localhost:3000).
 
 If you want to use the live UAT policy search APIs on the **Policies** page instead of pure mock data, you must also create a local `.env.local` with the UAT settings that your team shares out of band (not in this repo).
 
+For the **Documents** tab on a policy detail page, the app calls the Catalyst document search API. If you get a 404:
+- Set **`UAT_POLICY_DOCUMENTS_URL`** to the exact full URL that works in Postman (recommended), or
+- Add **`UAT_POLICY_DOCUMENTS_USE_POLICY_BASE=true`** to use the policy base URL (`UAT_API_BASE_URL`, e.g. `digital.policy.catalyst`) instead of `UAT_DOCUMENT_API_BASE_URL`, or
+- Set **`UAT_POLICY_DOCUMENTS_PATH`** to a different path (default is `/CatalystDocumentAPI/documents/search`). The UI shows the URL we tried when a 404 occurs.
+
+**Document download** (Download button on the Documents tab) uses the same token as search and sends **`UAT_POLICY_IMPERSONATE_ID`** in an impersonation header. If you get **403 Forbidden**, the API may expect a different header name: set **`UAT_POLICY_DOCUMENTS_DOWNLOAD_IMPERSONATE_HEADER`** (e.g. `X-Impersonate-Id`). Check your API docs for the exact header name.
+
 ## What’s included
 
 - **Dashboard** (`/`) – Migration stats (total policies, migrated, failures, in progress). Uses migrations from context so new migrations are included.

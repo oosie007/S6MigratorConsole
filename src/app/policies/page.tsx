@@ -1,7 +1,8 @@
 "use client";
 
 import { Fragment, useMemo, useState } from "react";
-import { Search } from "lucide-react";
+import Link from "next/link";
+import { Search, Pencil } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -21,6 +22,56 @@ import {
 } from "@/lib/mock-data";
 
 const POLICIES_PER_PRODUCT = 80;
+
+/** Extract list of policy-like objects from UAT search/detail response (handles multiple shapes). */
+function extractRawPolicies(data: unknown): unknown[] {
+  if (data == null) return [];
+  const d = data as Record<string, unknown>;
+  if (Array.isArray(d.details)) return d.details;
+  if (Array.isArray(d.policies)) return d.policies;
+  if (Array.isArray(d.results)) return d.results;
+  if (Array.isArray(d.items)) return d.items;
+  const inner = d.data as Record<string, unknown> | unknown[] | undefined;
+  if (Array.isArray(inner)) return inner;
+  if (inner != null && typeof inner === "object" && Array.isArray((inner as Record<string, unknown>).details))
+    return (inner as { details: unknown[] }).details;
+  if (inner != null && typeof inner === "object" && Array.isArray((inner as Record<string, unknown>).policies))
+    return (inner as { policies: unknown[] }).policies;
+  if (Array.isArray(data)) return data;
+  return [];
+}
+
+/** Map a single raw policy object from the API to Policy (tolerates different field names). */
+function mapRawToPolicy(raw: unknown, index: number): Policy {
+  const r = (raw ?? {}) as Record<string, unknown>;
+  const basicInfo = (r.basicInfo ?? {}) as Record<string, unknown>;
+  const people = Array.isArray(r.people) ? r.people : [];
+  const person = (people[0] ?? {}) as Record<string, unknown>;
+  const firstName = String(person.firstName ?? "");
+  const lastName = String(person.lastName ?? "");
+  const fullName = `${firstName} ${lastName}`.trim();
+  const policyNumber = String(basicInfo.policyNumber ?? r.policyNumber ?? "");
+  const dateEffective = String(
+    basicInfo.effectiveDate ?? basicInfo.effective ?? r.dateEffective ?? r.effectiveDate ?? ""
+  );
+  const customerName =
+    String(r.customerName ?? "").trim() ||
+    (fullName || "Unknown customer");
+  const productName = String(
+    basicInfo.productName ?? r.productName ?? "Unknown"
+  );
+  const status = String(basicInfo.status ?? r.status ?? "Unknown");
+  const id = String(r.id ?? basicInfo.policyNumber ?? r.policyNumber ?? `uat-${index}`);
+
+  return {
+    id,
+    policyNumber,
+    dateEffective,
+    customerName,
+    productName,
+    status,
+  };
+}
 
 export default function PoliciesPage() {
   const [query, setQuery] = useState("");
@@ -110,6 +161,7 @@ export default function PoliciesPage() {
                     setError(null);
 
                     let mapped: Policy[] = [];
+                    let searchResponse: unknown = null;
 
                     if (effectiveDate) {
                       // Date-based search via UAT API
@@ -127,49 +179,12 @@ export default function PoliciesPage() {
                       }
                       const data = await res.json();
                       console.log("UAT policy search raw data", data);
+                      searchResponse = data;
 
-                      const rawPolicies: any[] = Array.isArray(
-                        (data as any).details
-                      )
-                        ? (data as any).details
-                        : Array.isArray((data as any).policies)
-                        ? (data as any).policies
-                        : Array.isArray(data)
-                        ? data
-                        : [];
-
-                      mapped = rawPolicies.map((raw, index) => {
-                        const basicInfo = raw.basicInfo ?? {};
-                        const people = raw.people ?? [];
-                        const person = people[0] ?? {};
-
-                        const firstName = person.firstName ?? "";
-                        const lastName = person.lastName ?? "";
-                        const fullName = `${firstName} ${lastName}`.trim();
-
-                        return {
-                          id: String(
-                            raw.id ?? basicInfo.policyNumber ?? `uat-${index}`
-                          ),
-                          policyNumber:
-                            basicInfo.policyNumber ?? raw.policyNumber ?? "",
-                          dateEffective:
-                            basicInfo.effectiveDate ??
-                            raw.dateEffective ??
-                            "",
-                          customerName:
-                            raw.customerName ??
-                            (fullName !== "" ? fullName : "Unknown customer"),
-                          productName:
-                            basicInfo.productName ??
-                            raw.productName ??
-                            "Unknown",
-                          status:
-                            basicInfo.status ??
-                            raw.status ??
-                            "Unknown",
-                        };
-                      });
+                      const rawPolicies = extractRawPolicies(data);
+                      mapped = rawPolicies.map((raw, index) =>
+                        mapRawToPolicy(raw, index)
+                      );
                     } else if (query) {
                       // Policy-number search via detail endpoint
                       const res = await fetch(
@@ -185,46 +200,20 @@ export default function PoliciesPage() {
                         );
                       }
                       const raw = await res.json();
-
-                      const basicInfo = raw.basicInfo ?? {};
-                      const people = raw.people ?? [];
-                      const person = people[0] ?? {};
-
-                      const firstName = person.firstName ?? "";
-                      const lastName = person.lastName ?? "";
-                      const fullName = `${firstName} ${lastName}`.trim();
-
-                      mapped = [
-                        {
-                          id: String(
-                            raw.id ?? basicInfo.policyNumber ?? "uat-detail"
-                          ),
-                          policyNumber:
-                            basicInfo.policyNumber ?? raw.policyNumber ?? "",
-                          dateEffective:
-                            basicInfo.effectiveDate ?? raw.dateEffective ?? "",
-                          customerName:
-                            raw.customerName ??
-                            (fullName !== "" ? fullName : "Unknown customer"),
-                          productName:
-                            basicInfo.productName ??
-                            raw.productName ??
-                            "Unknown",
-                          status:
-                            basicInfo.status ??
-                            raw.status ??
-                            "Unknown",
-                        },
-                      ];
+                      mapped = [mapRawToPolicy(raw, 0)];
                     }
 
                     if (!mapped.length) {
-                      // If mapping failed, fall back to mock data but surface a hint.
+                      const rawPolicies = searchResponse != null ? extractRawPolicies(searchResponse) : [];
+                      const hadResults = rawPolicies.length > 0;
                       setError(
-                        "Live API call succeeded but no policies could be mapped. Check the API schema mapping."
+                        hadResults
+                          ? "Live API call succeeded but no policies could be mapped. Check the API schema mapping."
+                          : "No policies found for the given search. Try a different date or policy number."
                       );
                       setLivePolicies(null);
                     } else {
+                      setError(null);
                       setLivePolicies(mapped);
                     }
                   } catch (err) {
@@ -265,9 +254,10 @@ export default function PoliciesPage() {
               <TableRow className="border-border hover:bg-transparent">
                 <TableHead className="text-muted-foreground">Policy number</TableHead>
                 <TableHead className="text-muted-foreground">Date effective</TableHead>
-              <TableHead className="text-muted-foreground">Status</TableHead>
+                <TableHead className="text-muted-foreground">Status</TableHead>
                 <TableHead className="text-muted-foreground">Customer</TableHead>
                 <TableHead className="text-muted-foreground">Product</TableHead>
+                <TableHead className="w-12 text-right text-muted-foreground" aria-label="View full details" />
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -343,10 +333,23 @@ export default function PoliciesPage() {
                       <TableCell className="text-muted-foreground">
                         {policy.productName}
                       </TableCell>
+                      <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
+                        <Button
+                          variant="ghost"
+                          size="icon-sm"
+                          className="h-8 w-8 text-muted-foreground hover:text-foreground"
+                          aria-label={`View full details for ${policy.policyNumber}`}
+                          asChild
+                        >
+                          <Link href={`/policies/${encodeURIComponent(policy.policyNumber)}`}>
+                            <Pencil className="h-4 w-4" />
+                          </Link>
+                        </Button>
+                      </TableCell>
                     </TableRow>
                     {isExpanded && (
                       <TableRow className="border-border bg-muted/5">
-                        <TableCell colSpan={5} className="p-4">
+                        <TableCell colSpan={6} className="p-4">
                           {detailsLoadingId === policy.id && (
                             <p className="text-sm text-muted-foreground">
                               Loading details…
@@ -389,6 +392,58 @@ export default function PoliciesPage() {
                                         {detail.basicInfo?.expirationDate ?? "—"}
                                       </dd>
                                     </div>
+                                    <div className="flex justify-between gap-4">
+                                      <dt className="text-muted-foreground">
+                                        Term effective date
+                                      </dt>
+                                      <dd>
+                                        {detail.basicInfo?.termEffectiveDate ?? "—"}
+                                      </dd>
+                                    </div>
+                                    <div className="flex justify-between gap-4">
+                                      <dt className="text-muted-foreground">
+                                        Term number
+                                      </dt>
+                                      <dd>
+                                        {detail.basicInfo?.termNumber ?? "—"}
+                                      </dd>
+                                    </div>
+                                    <div className="flex justify-between gap-4">
+                                      <dt className="text-muted-foreground">
+                                        Auto renew
+                                      </dt>
+                                      <dd>
+                                        {detail.basicInfo?.autoRenew ?? "—"}
+                                      </dd>
+                                    </div>
+                                    <div className="flex justify-between gap-4">
+                                      <dt className="text-muted-foreground">
+                                        On-term end
+                                      </dt>
+                                      <dd>
+                                        {detail.basicInfo?.onTermEnd ?? "—"}
+                                      </dd>
+                                    </div>
+                                    <div className="flex justify-between gap-4">
+                                      <dt className="text-muted-foreground">
+                                        Cancellation date
+                                      </dt>
+                                      <dd>
+                                        {detail.basicInfo?.cancellationDate ?? "—"}
+                                      </dd>
+                                    </div>
+                                    <div className="flex justify-between gap-4">
+                                      <dt className="text-muted-foreground">
+                                        Cancellation reason
+                                      </dt>
+                                      <dd>
+                                        {typeof detail.basicInfo?.cancellationReason === "object"
+                                          ? (detail.basicInfo?.cancellationReason as any)?.label ??
+                                            (detail.basicInfo?.cancellationReason as any)?.id ??
+                                            "—"
+                                          : detail.basicInfo?.cancellationReason ?? "—"}
+                                      </dd>
+                                    </div>
                                   </dl>
                                 </div>
                                 <div>
@@ -423,6 +478,30 @@ export default function PoliciesPage() {
                                         {detail.basicInfo?.currency?.id ?? "—"}
                                       </dd>
                                     </div>
+                                    <div className="flex justify-between gap-4">
+                                      <dt className="text-muted-foreground">
+                                        Plan name
+                                      </dt>
+                                      <dd>
+                                        {detail.basicInfo?.planName ?? "—"}
+                                      </dd>
+                                    </div>
+                                    <div className="flex justify-between gap-4">
+                                      <dt className="text-muted-foreground">
+                                        Journey ID
+                                      </dt>
+                                      <dd>
+                                        {detail.basicInfo?.journeyId ?? "—"}
+                                      </dd>
+                                    </div>
+                                    <div className="flex justify-between gap-4">
+                                      <dt className="text-muted-foreground">
+                                        Partner
+                                      </dt>
+                                      <dd>
+                                        {detail.basicInfo?.partner ?? "—"}
+                                      </dd>
+                                    </div>
                                   </dl>
                                 </div>
                                 <div>
@@ -437,6 +516,24 @@ export default function PoliciesPage() {
                                       <dd>
                                         {detail.basicInfo?.latestPremium ??
                                           "—"}
+                                      </dd>
+                                    </div>
+                                    <div className="flex justify-between gap-4">
+                                      <dt className="text-muted-foreground">
+                                        Billing currency
+                                      </dt>
+                                      <dd>
+                                        {detail.basicInfo?.billingCurrency ??
+                                          detail.basicInfo?.currency?.id ?? "—"}
+                                      </dd>
+                                    </div>
+                                    <div className="flex justify-between gap-4">
+                                      <dt className="text-muted-foreground">
+                                        Policy premium
+                                      </dt>
+                                      <dd>
+                                        {detail.basicInfo?.policyPremium ??
+                                          detail.basicInfo?.latestPremium ?? "—"}
                                       </dd>
                                     </div>
                                     <div className="flex justify-between gap-4">
@@ -512,7 +609,7 @@ export default function PoliciesPage() {
               {filteredPolicies.length === 0 && (
                 <TableRow>
                   <TableCell
-                    colSpan={5}
+                    colSpan={6}
                     className="py-8 text-center text-sm text-muted-foreground"
                   >
                     No policies match your current filters.

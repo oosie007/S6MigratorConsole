@@ -22,7 +22,7 @@ export async function GET(req: NextRequest) {
   const appKey = process.env.UAT_AUTH_APP_KEY;
   const policyBaseUrl = process.env.UAT_API_BASE_URL;
   const impersonateId =
-    process.env.UAT_POLICY_IMPERSONATE_ID ?? "KULDEEP.NAPHRI@CHUBB.COM";
+    process.env.UAT_POLICY_IMPERSONATE_ID ?? "";
 
   if (!authUrl || !resource || !appId || !appKey || !policyBaseUrl) {
     return NextResponse.json(
