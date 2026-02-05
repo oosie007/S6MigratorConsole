@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { AppSidebar } from "@/components/app-sidebar";
+import { ThemeProvider } from "@/components/theme-provider";
 import { MigrationsProvider } from "@/contexts/migrations-context";
 import "./globals.css";
 
@@ -14,12 +15,14 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className="dark">
+    <html lang="en" suppressHydrationWarning>
       <body className="flex min-h-screen bg-background text-foreground antialiased font-sans">
-        <MigrationsProvider>
-          <AppSidebar />
-          <main className="flex-1 overflow-auto">{children}</main>
-        </MigrationsProvider>
+        <ThemeProvider>
+          <MigrationsProvider>
+            <AppSidebar />
+            <main className="flex-1 overflow-auto">{children}</main>
+          </MigrationsProvider>
+        </ThemeProvider>
       </body>
     </html>
   );

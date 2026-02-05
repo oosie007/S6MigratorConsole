@@ -51,8 +51,8 @@
   /* Fonts: system stack so no next/font / Turbopack dependency */
   --font-geist-sans: ui-sans-serif, system-ui, "Segoe UI", Roboto, sans-serif;
   --font-geist-mono: ui-monospace, "Cascadia Code", "Source Code Pro", monospace;
-  /* Black & white palette */
-  --background: oklch(0.99 0 0);
+  /* Light (off-white) palette */
+  --background: oklch(0.97 0 0);
   --foreground: oklch(0.12 0 0);
   --card: oklch(1 0 0);
   --card-foreground: oklch(0.12 0 0);

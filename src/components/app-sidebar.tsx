@@ -6,6 +6,7 @@ import { LayoutDashboard, ListTodo, PlusCircle, FileText } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
+import { ModeToggle } from "@/components/mode-toggle";
 
 const nav = [
   { label: "Dashboard", href: "/", icon: LayoutDashboard },
@@ -19,10 +20,11 @@ export function AppSidebar() {
 
   return (
     <aside className="flex w-56 flex-col border-r border-border bg-card">
-      <div className="flex h-14 items-center border-b border-border px-4">
+      <div className="flex h-14 items-center gap-2 border-b border-border px-4">
         <span className="font-semibold tracking-tight text-foreground">
           S6 → Catalyst
         </span>
+        <ModeToggle />
       </div>
       <nav className="flex flex-1 flex-col gap-0.5 p-2">
         {nav.map((item) => {
